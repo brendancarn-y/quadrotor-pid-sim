@@ -1,5 +1,6 @@
 # Quadrotor Altitude PID Simulation
 import matplotlib
+import os
 import sys
 if "--no-show" in sys.argv:
     matplotlib.use('Agg')
@@ -169,7 +170,9 @@ if __name__ == "__main__":
     axes[-1, 1].set_xlabel("Time (s)")
     fig.suptitle("PID on true state vs. raw measurement vs. Kalman estimate", fontsize=13)
     plt.tight_layout()
-    plt.savefig("comparison.png", dpi=150)
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+    os.makedirs(out_dir, exist_ok=True)
+    plt.savefig(os.path.join(out_dir, "kalman_comparison.png"), dpi=150)
     if "--no-show" not in sys.argv:
         plt.show()
     plt.close()

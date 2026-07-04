@@ -55,7 +55,7 @@ task is deliberately the opposite, the case where classical control wins.
 
     python -m venv .venv
     .venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
-    pip install "stable-baselines3[extra]" gymnasium numpy matplotlib
+    pip install -r requirements.txt
     python train_ppo.py               # trains PPO, saves ppo_altitude.zip (~4 min, CPU)
     python evaluate.py                # writes results/comparison.png and the metrics table
 
@@ -63,7 +63,7 @@ task is deliberately the opposite, the case where classical control wins.
 
 # Foundation: PID + Kalman filter
 
-![PID / Kalman comparison](comparison.png)
+![PID / Kalman comparison](results/kalman_comparison.png)
 
 A PID's derivative term differentiates whatever you feed it, and differentiating a noisy signal makes the noise worse. To fix this, I added a Kalman filter to sidestep it by estimating velocity as part of the state instead of differencing the position signal.
 
@@ -90,12 +90,19 @@ As shown in the plot, the filter estimates velocity as part of the state rather 
     pip install numpy matplotlib
     python sim.py
 
-This writes `comparison.png`, the figure shown above.
+This writes `results/kalman_comparison.png`, the figure shown above.
 
-## Files
+## Project layout
 
-- `sim.py` — standalone PID + Kalman altitude simulation (the foundation figure)
-- `envs/altitude_env.py` — dynamics wrapped as a Gymnasium environment
-- `controllers/pid.py` — PID control law as a policy object
-- `train_ppo.py` — trains and saves the PPO policy
-- `evaluate.py` — benchmarks PID vs PPO, writes `results/comparison.png`
+    sim.py                     # standalone PID + Kalman simulation (foundation figure)
+    train_ppo.py               # trains and saves the PPO policy
+    evaluate.py                # benchmarks PID vs PPO, writes the comparison figure
+    run_benchmark.bat          # double-click on Windows to run evaluate.py and open the figure
+    requirements.txt           # dependencies for the RL benchmark
+    envs/
+        altitude_env.py        # dynamics wrapped as a Gymnasium environment
+    controllers/
+        pid.py                 # PID control law as a policy object
+    results/
+        comparison.png         # PID vs PPO benchmark (from evaluate.py)
+        kalman_comparison.png  # PID + Kalman foundation (from sim.py)
