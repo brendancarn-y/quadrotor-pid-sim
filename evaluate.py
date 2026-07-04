@@ -17,6 +17,10 @@ from stable_baselines3 import PPO
 from envs.altitude_env import AltitudeEnv
 from controllers.pid import PIDPolicy
 
+# Anchor all file paths to this script's folder, so it runs from any directory
+# (e.g. VS Code's Run button, which launches from a different working dir).
+HERE = os.path.dirname(os.path.abspath(__file__))
+
 # Classical baseline re-tuned for the normalized/hover-offset action space.
 # Integral is 0: with gravity fed forward there is no offset to integrate away.
 PID_GAINS = dict(kp=1.5, ki=0.0, kd=0.8)
@@ -68,7 +72,7 @@ def avg_metrics(make_controller, setpoint, is_rl):
 
 
 def main():
-    model = PPO.load("ppo_altitude")
+    model = PPO.load(os.path.join(HERE, "ppo_altitude"))
 
     def make_pid(env):
         return PIDPolicy(dt=env.dt, **PID_GAINS)
@@ -104,9 +108,11 @@ def main():
     axes[0].set_ylabel("altitude (m)")
     fig.suptitle("PID vs PPO on 1-DOF altitude control (Kalman-filtered observation)", fontsize=13)
     plt.tight_layout()
-    os.makedirs("results", exist_ok=True)
-    plt.savefig("results/comparison.png", dpi=150)
-    print("saved results/comparison.png")
+    out_dir = os.path.join(HERE, "results")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, "comparison.png")
+    plt.savefig(out_path, dpi=150)
+    print(f"saved {out_path}")
 
 
 if __name__ == "__main__":
