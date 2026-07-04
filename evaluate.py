@@ -12,6 +12,8 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+print("Loading libraries (first PyTorch import takes a few seconds)...", flush=True)
 from stable_baselines3 import PPO
 
 from envs.altitude_env import AltitudeEnv
@@ -72,6 +74,7 @@ def avg_metrics(make_controller, setpoint, is_rl):
 
 
 def main():
+    print("Running benchmark (~20 seconds, please wait)...\n", flush=True)
     model = PPO.load(os.path.join(HERE, "ppo_altitude"))
 
     def make_pid(env):
