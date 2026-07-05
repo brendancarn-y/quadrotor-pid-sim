@@ -19,7 +19,7 @@ class AltitudeEnv(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, dt=0.01, max_steps=1000, z_target=10.0,
-                 sigma_z=0.25, sigma_a=1.0, dist_range=0.0):
+                 sigma_z=0.25, sigma_a=1.0):
         super().__init__()
         self.dt = dt
         self.max_steps = max_steps
@@ -28,10 +28,6 @@ class AltitudeEnv(gym.Env):
         self.T_max = 2.0 * self.m * self.g      # realistic thrust-to-weight = 2
         self.sigma_z = sigma_z                  # measurement noise std (m)
         self.sigma_a = sigma_a                  # process noise std (m/s^2)
-        # per-episode unknown constant disturbance acceleration, sampled from
-        # +/- dist_range on reset. 0.0 (default) = no disturbance = original env.
-        self.dist_range = dist_range
-        self.b_true = 0.0
 
         # Kalman model matrices (state x = [z, v]^T), from sim.py
         self.F = np.array([[1.0, dt], [0.0, 1.0]])
@@ -56,28 +52,18 @@ class AltitudeEnv(gym.Env):
         self.z, self.vz, self.steps = 0.0, 0.0, 0
         self.x_hat = np.array([[0.0], [0.0]])   # filter estimate
         self.P = np.eye(2)                       # filter covariance
-        # draw this episode's disturbance (or take a fixed one via options)
-        if options is not None and "b_true" in options:
-            self.b_true = float(options["b_true"])
-        elif self.dist_range > 0.0:
-            self.b_true = float(self.np_random.uniform(-self.dist_range, self.dist_range))
-        else:
-            self.b_true = 0.0
         return self._obs(), {}
 
     def step(self, action):
         a = float(np.clip(action, -1.0, 1.0)[0])
         hover = self.m * self.g
         T = hover + a * (self.T_max - hover)     # map action -> thrust
-        az = (T - self.m * self.g) / self.m      # commanded acceleration
-        true_acc = az + self.b_true              # unknown disturbance perturbs the plant
-        self.vz += true_acc * self.dt
+        az = (T - self.m * self.g) / self.m      # dynamics (from sim.py)
+        self.vz += az * self.dt
         self.z += self.vz * self.dt
         self.steps += 1
 
-        # noisy measurement, then Kalman predict + update.
-        # Predict uses the KNOWN commanded accel az, not true_acc -- the filter
-        # (and controller) are blind to the disturbance b_true.
+        # noisy measurement, then Kalman predict (with commanded accel) + update
         y = self.z + self.np_random.normal(0.0, self.sigma_z)
         self.x_hat = self.F @ self.x_hat + self.G * az
         self.P = self.F @ self.P @ self.F.T + self.Q

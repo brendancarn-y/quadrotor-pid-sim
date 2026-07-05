@@ -19,6 +19,12 @@ Created a Gymnasium environment from the altitude simulation and trained a PPO p
 
 This is the expected outcome, given that the simulation is low-dimensional, linear, and well-modelled, and that the PID is already near-optimal. The PID requires no training and generalizes to new setpoints automatically, whereas the PPO performs best when trained on a specific task and simulated in a nonlinear or hard-to-model environment. Because of this, PID is better suited to the simulation and wins on metrics.
 
+## Why PID wins here (and when it wouldn't)
+
+PID is close to optimal for a plant like this one: 1D, linear, and fully modelled. Every source of difficulty I could add in this simulation turned out to have a clean classical answer — sensor noise is handled by the Kalman filter, a constant disturbance would be handled by integral action, and a known nonlinearity would be handled by feedback linearization. I tried to find a version of the simulation where the outcome was genuinely uncertain, or where the learned policy would have a real edge, and I couldn't: anything I can write down as equations and simulate, a classical controller can be designed to handle just as well.
+
+That is the honest takeaway. Reinforcement learning earns its advantage outside this regime — on systems that are nonlinear, high-degree-of-freedom, or hard to model at all (real aerodynamics, contact, sim-to-real transfer), where you cannot hand-design the controller. This altitude task is deliberately the opposite, so it stands as a demonstration of *when* classical control is the right tool, rather than a case where learning was ever going to win.
+
 ## Set up
 
 * **Plant:** `envs/altitude_env.py`. Altitude simulation is wrapped behind a Gymnasium `step(action)` interface, so both controllers use the same physics. Action is normalized thrust in [-1, 1] (0 = hover), capped at a realistic thrust-to-weight of 2.
@@ -53,26 +59,6 @@ As shown in the plot, the filter estimates velocity as part of the state rather 
 
 > **Note:** The Kalman predict step feeds it the commanded acceleration. I started with a=0, but it blew up in every configuration. P-only got pumped past 130 m, PD had a huge positive bias. This was because, with a=0, the drone can't be seen accelerating, so the estimate lags the truth, creating a phase lag, and destabilizing the feedback loop.
 
----
-
-## Robustness to an unmodelled disturbance
-
-![Steady-state error vs disturbance for PID, clean PPO, and domain-randomized PPO, plus altitude traces under a strong disturbance](results/disturbance_robustness.png)
-
-The benchmark above is a clean, exact-model world, and PID wins it. The more interesting question is what happens when the world is *not* exactly as modelled. So I added an unknown constant disturbance acceleration to the plant each episode — a steady push the controller can't measure, like wind or an unmodelled payload — and compared three controllers: the hand-tuned PID, the original PPO trained on the clean world, and a second PPO retrained with the disturbance randomized across episodes (domain randomization).
-
-| controller | mean \|steady-state error\| | worst case | error at zero disturbance |
-|---|---|---|---|
-| PID | 1.53 m | 2.76 m | 0.02 m |
-| PPO (clean) | 1.52 m | 2.86 m | 0.09 m |
-| PPO (robust) | **1.00 m** | **2.17 m** | 0.23 m |
-
-The result flips. On the exact model (zero disturbance) PID is still best — it settles within 2 cm, while the robust policy sits 23 cm off. But averaged across the disturbance range, **the domain-randomized PPO is the most robust by a wide margin** (1.00 m mean error vs 1.53 m for PID), with the best worst case as well. The clean PPO, which never saw a disturbance, is no better than PID — the robustness comes specifically from training on the uncertainty, not from being a neural network.
-
-That trade-off is the point: the robust policy gives up a little nominal accuracy to stay accurate across conditions it can't measure. **Classical control wins when the model is exact; learned control wins when the world is uncertain.** Knowing which regime you are in is the actual engineering judgment.
-
-> **Note:** None of the three fully cancels the disturbance. A memoryless controller — PID without an integral term, or a PPO that sees only the current error and velocity — cannot drive a constant unknown push to zero steady-state error; that needs integral action or state augmentation. Domain randomization doesn't remove that limit, it just finds the best fixed policy across the range of disturbances.
-
 ## Reproduce
 
 ```bash
@@ -83,9 +69,6 @@ pip install -r requirements.txt
 python sim.py                     # Foundation figure: PID + Kalman (results/kalman_comparison.png)
 python train_ppo.py               # Trains PPO, saves ppo_altitude.zip (~4 min, CPU)
 python evaluate.py                # Benchmark table + generalization test (results/comparison.png)
-
-python train_ppo_robust.py        # Trains the domain-randomized PPO (~4 min, CPU)
-python evaluate_disturbance.py    # Robustness benchmark (results/disturbance_robustness.png)
 ```
 
 ## Files
@@ -95,5 +78,3 @@ python evaluate_disturbance.py    # Robustness benchmark (results/disturbance_ro
 * `controllers/pid.py` — the PID as a policy object
 * `train_ppo.py` — trains the PPO policy
 * `evaluate.py` — the PID-vs-PPO benchmark and generalization test
-* `train_ppo_robust.py` — trains the domain-randomized (robust) PPO policy
-* `evaluate_disturbance.py` — the robustness benchmark under unmodelled disturbances
