@@ -55,23 +55,23 @@ As shown in the plot, the filter estimates velocity as part of the state rather 
 
 ---
 
-## Disturbance estimation (state augmentation)
+## Robustness to an unmodelled disturbance
 
-![Disturbance observer: altitude droop and recovery, the estimate b-hat converging to the true disturbance, and a lagging time-varying estimate](results/disturbance_observer.png)
+![Steady-state error vs disturbance for PID, clean PPO, and domain-randomized PPO, plus altitude traces under a strong disturbance](results/disturbance_robustness.png)
 
-I then tested whether the filter could handle a force it was never told about, like an unmodelled payload or a steady downdraft. I added an unknown constant disturbance acceleration (`b_true = -2 m/s²`) to the true plant and augmented the Kalman state to `x = [z, v, b]`, so the filter has to estimate the disturbance from noisy position measurements alone.
+The benchmark above is a clean, exact-model world, and PID wins it. The more interesting question is what happens when the world is *not* exactly as modelled. So I added an unknown constant disturbance acceleration to the plant each episode — a steady push the controller can't measure, like wind or an unmodelled payload — and compared three controllers: the hand-tuned PID, the original PPO trained on the clean world, and a second PPO retrained with the disturbance randomized across episodes (domain randomization).
 
-First I checked that this is even possible: the script computes the observability matrix of the augmented system and finds it full rank (`det = dt³ ≠ 0`), so `b` is recoverable from position alone. And it is — `b̂` converges to −2 m/s² within about a second.
+| controller | mean \|steady-state error\| | worst case | error at zero disturbance |
+|---|---|---|---|
+| PID | 1.53 m | 2.76 m | 0.02 m |
+| PPO (clean) | 1.52 m | 2.86 m | 0.09 m |
+| PPO (robust) | **1.00 m** | **2.17 m** | 0.23 m |
 
-| case | steady-state altitude |
-|---|---|
-| no disturbance (reference droop) | 8.30 m |
-| disturbance, no feedforward | 7.96 m |
-| disturbance, feedforward (−m·b̂) | 8.30 m |
+The result flips. On the exact model (zero disturbance) PID is still best — it settles within 2 cm, while the robust policy sits 23 cm off. But averaged across the disturbance range, **the domain-randomized PPO is the most robust by a wide margin** (1.00 m mean error vs 1.53 m for PID), with the best worst case as well. The clean PPO, which never saw a disturbance, is no better than PID — the robustness comes specifically from training on the uncertainty, not from being a neural network.
 
-The interesting part is what the feedforward does. Uncorrected, the disturbance droops the drone further, to 7.96 m. Feeding the estimate forward as a `−m·b̂` thrust term recovers the altitude, but only back to 8.30 m — the disturbance-free droop, not the 10 m setpoint. So disturbance feedforward cancels the disturbance, not the gravity droop: it removes the unknown force and restores the nominal PD response, which still droops because proportional control needs error to hold thrust. Reaching the setpoint would still need integral action. Feedforward is not integral action.
+That trade-off is the point: the robust policy gives up a little nominal accuracy to stay accurate across conditions it can't measure. **Classical control wins when the model is exact; learned control wins when the world is uncertain.** Knowing which regime you are in is the actual engineering judgment.
 
-> **Note:** The augmentation assumes `b` is constant. Against a time-varying disturbance (a 0.1 Hz sine, bottom-right panel) the estimate visibly lags the truth. The disturbance process-noise `qb` sets this trade-off: a larger `qb` tracks change faster but makes the estimate noisier.
+> **Note:** None of the three fully cancels the disturbance. A memoryless controller — PID without an integral term, or a PPO that sees only the current error and velocity — cannot drive a constant unknown push to zero steady-state error; that needs integral action or state augmentation. Domain randomization doesn't remove that limit, it just finds the best fixed policy across the range of disturbances.
 
 ## Reproduce
 
@@ -81,16 +81,19 @@ python -m venv .venv
 pip install -r requirements.txt
 
 python sim.py                     # Foundation figure: PID + Kalman (results/kalman_comparison.png)
-python disturbance_observer.py    # Disturbance estimation (results/disturbance_observer.png)
 python train_ppo.py               # Trains PPO, saves ppo_altitude.zip (~4 min, CPU)
 python evaluate.py                # Benchmark table + generalization test (results/comparison.png)
+
+python train_ppo_robust.py        # Trains the domain-randomized PPO (~4 min, CPU)
+python evaluate_disturbance.py    # Robustness benchmark (results/disturbance_robustness.png)
 ```
 
 ## Files
 
 * `sim.py` — the standalone PID + Kalman simulation (writes `results/kalman_comparison.png`)
-* `disturbance_observer.py` — state-augmented disturbance estimation (writes `results/disturbance_observer.png`)
 * `envs/altitude_env.py` — the plant as a Gymnasium environment
 * `controllers/pid.py` — the PID as a policy object
 * `train_ppo.py` — trains the PPO policy
 * `evaluate.py` — the PID-vs-PPO benchmark and generalization test
+* `train_ppo_robust.py` — trains the domain-randomized (robust) PPO policy
+* `evaluate_disturbance.py` — the robustness benchmark under unmodelled disturbances
