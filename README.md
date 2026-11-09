@@ -19,7 +19,7 @@ Created a Gymnasium environment from the altitude simulation and trained a PPO p
 
 This is the expected outcome, given that the simulation is low-dimensional, linear, and well-modelled, and that the PID is already near-optimal. The PID requires no training and automatically applies to new setpoints, whereas the PPO performs best when trained using a specific task and simulated in a nonlinear or hard-to-model environment. Because of this, PID is better suited to the simulation and wins on metrics.
 
-## Why PID wins here (and when it wouldn't)
+## Why PID wins here
 
 PID is pretty much optimal for a plant like this one: 1D, linear, and fully modelled. Every source of difficulty I tried (like adding an unexpected distrubance or drag and ground effect physics) of had a clean answer: the Kalman filter handles sensor noise; a constant disturbance would be handled by integral action; and a known nonlinearity would be handled by feedback linearization.
 
