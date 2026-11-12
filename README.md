@@ -1,14 +1,14 @@
-# 1D Quadrotor Altitude Control: PID, Kalman Filter, and a Learned (PPO) Benchmark
+# 1D Quadrotor Altitude Control: PID, Kalman Filter, and a PPO Benchmark
 
-Vertical altitude control for a quadrotor in Python. Simulating noisy data, running it through a Kalman filter to make it usable, then taking in the usable data and comparing a reinforcement-learning model (PPO) against a PID to determine effectiveness for this scenario.
+This repository simulates vertical (altitude) control of a quadrotor in Python. Altitude measurements are corrupted with Gaussian noise and passed through a Kalman filter, which estimates altitude and vertical velocity. A PID controller and a reinforcement-learning policy (PPO) are then compared on the same filtered state estimate.
 
-## Result: PID vs. a learned policy
+## Results: PID vs. PPO
 
 ![PID vs PPO benchmark: altitude response of PID and PPO at 10 m, 6 m, and 14 m setpoints](results/comparison.png)
 
-Created a Gymnasium environment from the altitude simulation and trained a PPO policy to compete against the PID, both acting on the same Kalman-filtered state estimate. PID beat PPO on every metric at the trained 10 m setpoint, as well as settling time and steady state error at the unseen setpoints (6 m and 14 m).
+The altitude simulation is wrapped as a Gymnasium environment. A PPO policy was trained at a 10 m setpoint and evaluated against a hand-tuned PID controller at the trained setpoint and at two unseen setpoints (6 m and 14 m). Metrics are averaged over 10 random seeds. Settling time is measured to a ±2% band around the setpoint.
 
-| setpoint | controller | steady-state err (m) | overshoot | settling (s) |
+| Setpoint | Controller | Steady-state error (m) | Overshoot | Settling time (s) |
 |---|---|---|---|---|
 | 10 m (trained) | PID | 0.03 | 0.9% | 1.84 |
 | 10 m (trained) | PPO | 0.10 | 9.1% | 2.77 |
@@ -17,64 +17,71 @@ Created a Gymnasium environment from the altitude simulation and trained a PPO p
 | 14 m (unseen) | PID | 0.03 | 9.1% | 3.32 |
 | 14 m (unseen) | PPO | 0.10 | 17.4% | 3.55 |
 
-This is the expected outcome, given that the simulation is low-dimensional, linear, and well-modelled, and that the PID is already near-optimal. The PID requires no training and automatically applies to new setpoints, whereas the PPO performs best when trained using a specific task and simulated in a nonlinear or hard-to-model environment. Because of this, PID is better suited to the simulation and wins on metrics.
+At the trained setpoint, PID outperforms PPO on all three metrics. At the unseen setpoints, PID has lower steady-state error and shorter settling time in both cases. PPO has slightly lower overshoot at 6 m, but its settling time at that setpoint is approximately four times longer than that of PID.
 
-## Why PID wins here
+This result is consistent with the structure of the problem. The plant is one-dimensional, linear, and fully modelled, which are the conditions under which a well-tuned PID controller performs close to optimally. A PID controller requires no training and applies to any setpoint without modification. PPO, by contrast, learns a policy from experience at the conditions it is trained on, and its advantages are expected in systems that are nonlinear, have many degrees of freedom, or are difficult to model.
 
-PID is pretty much optimal for a plant like this one: 1D, linear, and fully modelled. Every source of difficulty I tried (like adding an unexpected distrubance or drag and ground effect physics) of had a clean answer: the Kalman filter handles sensor noise; a constant disturbance would be handled by integral action; and a known nonlinearity would be handled by feedback linearization.
+## Discussion
 
-Reinforcement learning doesn't really fit this simulation. Its advantages are for systems that are nonlinear, high-degree-of-freedom, or hard to model at all (e.g., real aerodynamics, contact, sim-to-real transfer). This altitude task is the opposite.
+The difficulties a linear 1D plant can present each have a standard classical solution. Sensor noise is handled by state estimation (the Kalman filter used here). A constant disturbance is handled by integral action. A known nonlinearity, such as drag or ground effect, can be handled by feedback linearization. For this reason, reinforcement learning is not expected to outperform classical control on this task.
 
-In future i'll try to setup a simulation with more room for expirementaion.
+Problems where reinforcement learning is more appropriate include those involving unmodelled aerodynamics, contact, or transfer from simulation to hardware. A higher-dimensional simulation is planned as future work.
 
-## Set up
+## Setup
 
-* **Plant:** `envs/altitude_env.py`. Altitude simulation is wrapped behind a Gymnasium `step(action)`, so both controllers use the same physics. Action is normalized thrust in [-1, 1] (0 = hover), capped at a realistic thrust-to-weight of 2.
-* **Shared perception:** The Kalman filter serves as a shared front-end, so that systems share the same data, demonstrating the better strategy regardless of the data.
-* **PID:** `controllers/pid.py`. Because the hover offset feeds gravity forward, no integral term is needed (only needs PD).
-* **PPO:** `train_ppo.py`. Stable-Baselines3 PPO, 300k timesteps, trained only at the 10 m setpoint.
-* **Benchmark:** `evaluate.py`. Runs both through identical episodes, reports the metrics above, and runs the generalization test at unseen setpoints.
+* **Plant:** `envs/altitude_env.py`. The altitude dynamics are wrapped in a Gymnasium environment, so both controllers act on identical physics through `step(action)`. The quadrotor mass is 1 kg and the timestep is 0.01 s. The action is normalized thrust in [-1, 1], where 0 corresponds to hover thrust, with a maximum thrust-to-weight ratio of 2.
+* **State estimation:** Both controllers observe the same Kalman-filtered estimate of altitude and velocity, so that differences in performance are attributable to the controllers alone.
+* **PID:** `controllers/pid.py`, with gains Kp = 1.5, Ki = 0, Kd = 0.8. Because the action is defined relative to hover thrust, the weight of the vehicle is cancelled by feedforward. There is therefore no steady-state offset for an integral term to remove, and the controller operates as PD. This differs from `sim.py` (see below), where no feedforward is applied and the integral term is required.
+* **PPO:** `train_ppo.py`. Stable-Baselines3 PPO, trained for 300,000 timesteps at the 10 m setpoint only.
+* **Benchmark:** `evaluate.py`. Runs both controllers through identical episodes, computes the metrics above, and evaluates generalization at the unseen setpoints.
 
 ---
 
-## Kalman filter foundation
+## Kalman Filter and PID Foundation
 
-A PID's derivative term differentiates whatever you feed it, and differentiating a noisy signal makes the noise worse. To fix this, I added a Kalman filter to sidestep it by estimating velocity as part of the state instead of differencing the position signal.
+The derivative term of a PID controller acts on the rate of change of its input. When the input is a noisy measurement, differentiation amplifies the noise. The Kalman filter avoids this by estimating velocity as part of the state vector, so the derivative term can use the velocity estimate directly instead of differencing noisy position measurements.
+
+The runs in this section use `sim.py`, in which the controller outputs absolute thrust and no gravity feedforward is applied. Each gain configuration is run three times: on the true state, on the raw measurement, and on the Kalman estimate. The measurement noise standard deviation is 0.25 m.
 
 ![Altitude and thrust for P-only, PD, and PID: true state vs raw measurement vs Kalman estimate](results/kalman_comparison.png)
 
-### What happens
+### Controller behaviour
 
-P-only oscillates forever. The acceleration is proportional to displacement, and there's nothing proportional to velocity to dampen energy. This leaves us with the equation for shm, which oscillates indefinitely.
+**P-only (Kp = 5).** The response oscillates without decaying. The control force is proportional to displacement only, and no term opposes velocity, so the closed-loop system is equivalent to an undamped oscillator and energy is not dissipated.
 
-PD stops oscillating but settles low, around 8.37 m. The derivative term adds the missing damping, so the oscillation stops. However, the P term only pushes in proportion to how far off target the drone is. To generate enough thrust to cancel gravity, it needs some error to push against, so it settles at a fixed distance below the target.
+**PD (Kp = 6, Kd = 4).** The derivative term adds damping, and the oscillation decays. However, the system settles at approximately 8.37 m rather than 10 m. With no feedforward, the proportional term is the only source of the steady thrust required to support the vehicle's weight, and it produces thrust only in proportion to error. A nonzero steady-state error is therefore required to hold the vehicle up.
 
-PID hits the target. The integral term accumulates error over time, so its output keeps growing as long as any error exists, unlike P and D, which collapse to zero when the error does. The system can only settle when the error is zero and when the integral's thrust cancels gravity.
+**PID (Kp = 8, Ki = 1.5, Kd = 3.5).** The system reaches the setpoint. The integral term accumulates error over time, so its output continues to grow while any error remains. Equilibrium is reached only when the error is zero and the integral term alone supplies the thrust that balances gravity.
 
-### What the Kalman filter does
+The benchmark in `evaluate.py` addresses the same steady-state problem by a different method: the hover thrust is supplied by feedforward, so the integral term is not needed. Integral action and feedforward are two solutions to the same problem.
 
-The controller only sees a noisy sensor reading, which it feeds to the derivative term, which then exaggerates the noise. Adding a filter sits between the sensor and the controller and provides a clean estimate of altitude and velocity instead.
+On raw measurements, the PD and PID loops produce large thrust spikes and the altitude response diverges from the setpoint. On the Kalman estimate, both track the true-state response closely.
 
-At each step, it predicts where the drone should be using the physics model, then corrects that guess against the new reading. Then the Kalman gain determines how much to trust the sensor relative to the model, weighed by their respective uncertainties. A noisy sensor pulls K down and leans on the model, an unreliable model pushes it up, and it rebalances every step.
+### Kalman filter operation
 
-As shown in the plot, the filter estimates velocity as part of the state rather than differentiating noisy signals. This means the controller can use the filter's velocity estimate directly, rather than differentiating a noisy signal, and that the estimate tracks the true state.
+The filter estimates the state x = [z, v]ᵀ (altitude and vertical velocity). At each timestep it performs two operations:
 
-## Reproduce
+1. **Prediction.** The physics model propagates the previous estimate forward one timestep using the commanded acceleration, and the estimate's uncertainty grows by the process noise.
+2. **Correction.** The predicted altitude is compared with the new measurement, and the estimate is adjusted by the Kalman gain K multiplied by the difference.
+
+The Kalman gain sets the relative weighting of the measurement and the model, based on their respective uncertainties. Large measurement noise reduces K, so the estimate relies more on the model. Large model uncertainty increases K, so the estimate relies more on the measurement. The gain is recomputed at every step.
+
+## Reproduction
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
-python sim.py                     # Foundation figure: PID + Kalman (results/kalman_comparison.png)
-python train_ppo.py               # Trains PPO, saves ppo_altitude.zip (~4 min, CPU)
-python evaluate.py                # Benchmark table + generalization test (results/comparison.png)
+python sim.py                     # PID and Kalman filter comparison (results/kalman_comparison.png)
+python train_ppo.py               # Trains PPO and saves ppo_altitude.zip (approx. 4 min on CPU)
+python evaluate.py                # Benchmark table and generalization test (results/comparison.png)
 ```
 
 ## Files
 
-* `sim.py` — the standalone PID + Kalman simulation (writes `results/kalman_comparison.png`)
-* `envs/altitude_env.py` — the plant as a Gymnasium environment
-* `controllers/pid.py` — the PID as a policy object
-* `train_ppo.py` — trains the PPO policy
-* `evaluate.py` — the PID-vs-PPO benchmark
+* `sim.py`: standalone PID and Kalman filter simulation; writes `results/kalman_comparison.png`
+* `envs/altitude_env.py`: the plant as a Gymnasium environment
+* `controllers/pid.py`: the PID controller as a policy object
+* `train_ppo.py`: trains the PPO policy
+* `evaluate.py`: PID vs. PPO benchmark and generalization test
